@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.github
+data
+*.db
+*.db-journal
+.env*
+*.log
+README.md

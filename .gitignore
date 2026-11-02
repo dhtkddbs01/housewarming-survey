@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+
+# 로컬 실행 때 생기는 SQLite — 손님 이름이 들어 있으니 절대 커밋하지 않는다
+data/
+*.db
+*.db-journal
+
+.env*
+*.log
+.DS_Store
