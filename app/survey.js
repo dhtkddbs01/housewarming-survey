@@ -1,12 +1,15 @@
 'use client';
 
-import Link from 'next/link';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { EVENT_LABEL, GRILL, MAIN, NAME_MAX, PASTA, RICE } from '@/lib/options';
 
 // name → main → (pasta | rice) → grill → done
 const PREV = { main: 'name', pasta: 'main', rice: 'main' };
 const QUESTION_NO = { main: 1, pasta: 2, rice: 2, grill: 3 };
+
+// 질문이 바뀌어도 타일이 같은 자리에 있어서, 두 번 탭하면 다음 질문까지 눌린다.
+// 화면이 바뀐 직후 이 시간 동안은 입력을 무시한다.
+const INPUT_LOCK_MS = 350;
 
 export default function Survey() {
   const [step, setStep] = useState('name');
@@ -19,33 +22,41 @@ export default function Survey() {
   const [error, setError] = useState('');
   const [updated, setUpdated] = useState(false);
 
+  const lockUntil = useRef(0);
+
   const trimmed = name.trim();
+  const locked = () => Date.now() < lockUntil.current;
 
   function go(next) {
+    lockUntil.current = Date.now() + INPUT_LOCK_MS;
     setError('');
     setStep(next);
   }
 
   function back() {
+    if (locked()) return;
     go(step === 'grill' ? main : PREV[step]);
   }
 
   function pickMain(value) {
+    if (locked()) return;
     setMain(value);
     go(value);
   }
 
   function togglePasta(value) {
+    if (locked()) return;
     setPasta((cur) => (cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value]));
   }
 
   function pickRice(value) {
+    if (locked()) return;
     setRice(value);
     go('grill');
   }
 
   async function pickGrill(value) {
-    if (saving) return;
+    if (saving || locked()) return;
     setGrill(value);
     setSaving(true);
     setError('');
@@ -73,6 +84,7 @@ export default function Survey() {
   }
 
   function restart() {
+    if (locked()) return;
     setMain(null);
     setPasta([]);
     setRice(null);
@@ -89,7 +101,7 @@ export default function Survey() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (trimmed) go('main');
+            if (trimmed && !locked()) go('main');
           }}
         >
           <label className="field">
@@ -114,19 +126,17 @@ export default function Survey() {
 
   if (step === 'done') {
     return (
-      <section className="card center">
-        <p className="eyebrow">{EVENT_LABEL} 집들이</p>
-        <h1>{trimmed}님, 고마워요!</h1>
-        <p className="lead">{updated ? '이전 답을 새 답으로 바꿨어요.' : '답이 저장됐어요.'}</p>
-        <Link href="/menu" className="primary">
-          메뉴판 보기
-        </Link>
+      <>
+        <CourseMenu name={trimmed} main={main} pasta={pasta} rice={rice} grill={grill} />
+        <p className="saved">{updated ? '이전 답을 새 답으로 바꿨어요.' : '답이 저장됐어요. 고마워요!'}</p>
         <button type="button" className="ghost" onClick={restart}>
           답 바꾸기
         </button>
-      </section>
+      </>
     );
   }
+
+  const no = QUESTION_NO[step];
 
   return (
     <section className="card">
@@ -134,13 +144,18 @@ export default function Survey() {
         <button type="button" className="back" onClick={back} disabled={saving}>
           ← 이전
         </button>
-        <span className="progress">질문 {QUESTION_NO[step]}/3</span>
+        <span className="progress">
+          {no} / 3
+        </span>
+      </div>
+      <div className="bar" aria-hidden="true">
+        <span style={{ width: `${(no / 3) * 100}%` }} />
       </div>
 
       {step === 'main' && (
-        <Question title="면이랑 밥 중에 어떤 게 좋으세요?">
+        <Question no="Q1" title="면이랑 밥 중에 어떤 게 좋으세요?">
           {MAIN.map((o) => (
-            <Choice key={o.value} selected={main === o.value} onClick={() => pickMain(o.value)}>
+            <Choice key={o.value} selected={main === o.value} sub={o.sub} onClick={() => pickMain(o.value)}>
               {o.label}
             </Choice>
           ))}
@@ -148,7 +163,7 @@ export default function Survey() {
       )}
 
       {step === 'pasta' && (
-        <Question title="파스타에 무엇을 넣을까요?" note="여러 개 골라도 돼요">
+        <Question no="Q1-1" title="파스타에 무엇을 넣을까요?" note="여러 개 골라도 돼요">
           {PASTA.map((o) => (
             <Choice key={o.value} selected={pasta.includes(o.value)} onClick={() => togglePasta(o.value)} multi>
               {o.label}
@@ -161,7 +176,7 @@ export default function Survey() {
       )}
 
       {step === 'rice' && (
-        <Question title="어떤 밥이 좋으세요?">
+        <Question no="Q1-2" title="어떤 밥이 좋으세요?">
           {RICE.map((o) => (
             <Choice key={o.value} selected={rice === o.value} onClick={() => pickRice(o.value)}>
               {o.label}
@@ -171,7 +186,7 @@ export default function Survey() {
       )}
 
       {step === 'grill' && (
-        <Question title="생선구이와 고기구이 중에는요?">
+        <Question no="Q2" title="생선구이와 고기구이 중에는요?">
           {GRILL.map((o) => (
             <Choice key={o.value} selected={grill === o.value} onClick={() => pickGrill(o.value)} disabled={saving}>
               {saving && grill === o.value ? '저장 중…' : o.label}
@@ -189,17 +204,66 @@ export default function Survey() {
   );
 }
 
-function Question({ title, note, children }) {
+// 그 손님이 고른 것만으로 만든 코스 메뉴판 — 서버에서 다시 읽지 않고 화면 상태로 그린다
+function CourseMenu({ name, main, pasta, rice, grill }) {
+  const find = (list, value) => list.find((o) => o.value === value);
+  let meal;
+  if (main === 'pasta') {
+    const picked = PASTA.filter((o) => pasta.includes(o.value));
+    meal = {
+      ko: `${picked.map((o) => o.label).join(' · ')} 파스타`,
+      en: `${joinEn(picked.map((o) => o.en))} Pasta`,
+    };
+  } else {
+    const r = find(RICE, rice);
+    meal = { ko: r.menu, en: r.en };
+  }
+  const g = find(GRILL, grill);
+  const courses = [
+    { no: 'I', title: '식사', ...meal },
+    { no: 'II', title: '구이', ko: g.menu, en: g.en },
+  ];
+
   return (
-    <>
-      <h2>{title}</h2>
-      {note && <p className="hint">{note}</p>}
-      <div className="choices">{children}</div>
-    </>
+    <section className="card course">
+      <header className="course-head">
+        <h1>COURSE</h1>
+        <p className="course-for">{name}님을 위한 코스</p>
+        <p className="course-date">{EVENT_LABEL}</p>
+      </header>
+      {courses.map((c) => (
+        <div key={c.no} className="course-item">
+          <p className="course-no">
+            {c.no}. {c.title}
+          </p>
+          <p className="course-dish">{c.ko}</p>
+          <p className="course-en">{c.en}</p>
+        </div>
+      ))}
+      <p className="course-end" aria-hidden="true">
+        ✦
+      </p>
+    </section>
   );
 }
 
-function Choice({ selected, multi, children, ...props }) {
+// ['A','B','C'] → 'A, B & C'
+function joinEn(words) {
+  return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} & ${words[words.length - 1]}`;
+}
+
+function Question({ no, title, note, children }) {
+  return (
+    <div className="question">
+      <p className="qno">{no}</p>
+      <h2>{title}</h2>
+      {note && <p className="hint">{note}</p>}
+      <div className="choices">{children}</div>
+    </div>
+  );
+}
+
+function Choice({ selected, multi, sub, children, ...props }) {
   return (
     <button
       type="button"
@@ -208,7 +272,8 @@ function Choice({ selected, multi, children, ...props }) {
       {...props}
     >
       {multi && <span className="check" aria-hidden="true">{selected ? '✓' : ''}</span>}
-      {children}
+      <span className="choice-label">{children}</span>
+      {sub && <span className="choice-sub">{sub}</span>}
     </button>
   );
 }

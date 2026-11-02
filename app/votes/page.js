@@ -4,7 +4,8 @@ import { EVENT_LABEL, GRILL, MAIN, PASTA, RICE } from '@/lib/options';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: '집들이 메뉴판' };
+// 주인용 표 수 화면 — 어디에도 링크하지 않는다
+export const metadata = { title: '투표 현황', robots: { index: false, follow: false } };
 
 // 표 수 내림차순, 같으면 원래 순서
 function ranked(list, counts) {
@@ -13,7 +14,7 @@ function ranked(list, counts) {
     .sort((a, b) => b.votes - a.votes || a.i - b.i);
 }
 
-export default function MenuPage() {
+export default function VotesPage() {
   const tally = getTally();
   const items = { pasta: PASTA, rice: RICE };
   const meals = ranked(MAIN, tally.main).map((m) => ({
@@ -25,8 +26,8 @@ export default function MenuPage() {
     <section className="card menu">
       <header className="menu-head">
         <p className="eyebrow">{EVENT_LABEL}</p>
-        <h1>MENU</h1>
-        <p className="lead">응답 {tally.total}명</p>
+        <h1>VOTES</h1>
+        <p className="lead">응답 {tally.total}명 · 주인용</p>
       </header>
 
       {tally.total === 0 ? (
